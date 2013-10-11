@@ -1,0 +1,14 @@
+# Data generated from a SDPTSP-E instance solved in two phases
+# nbTasks=71, nbWorkers=62
+# Random number generator seed = 0
+Type = 1
+Jobs = 5
+ 10 50
+ 30 60
+ 90 100
+ 65 90
+ 100 101
+Qualifications = 3
+ 5: 0 1 2 3 4 
+ 0: 
+ 0: 
