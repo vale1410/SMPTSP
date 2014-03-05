@@ -1,3 +1,4 @@
+
 task(T) :- task(T,_,_). 
 worker(W) :- worker2task(W,_).
 

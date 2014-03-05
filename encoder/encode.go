@@ -3,22 +3,23 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/vale1410/bule/sat"
+	"github.com/vale1410/bule/sorters"
 	"io/ioutil"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
-
-//	"math"
-//	"os/exec"
-//	"time"
 )
 
 var f = flag.String("f", "test.dat", "Path of the file specifying the Problem.")
 var out = flag.String("o", "data.lp", "Path of data file")
-var model = flag.String("model", "model.lp", "path to model file")
+var typeIntersect = flag.String("intersect", "simple", "Type of encoding of non-intersection constriant for tasks.")
 var ver = flag.Bool("ver", false, "Show version info.")
-var solve = flag.Bool("solve", false, "Pass problem to clasp and solve.")
+var asp = flag.Bool("asp", false, "Output instance in Gringo ASP format.")
+var nWorkers = flag.Int("max", 0, "Max Number of Workers")
+
 var dbg = flag.Bool("d", false, "Print debug information.")
 var dbgfile = flag.String("df", "", "File to print debug information.")
 
@@ -55,9 +56,12 @@ There is NO WARRANTY, to the extent permitted by law.`)
 	debug("Tasks", tasks)
 	debug("Workers", workers)
 
-	if *solve {
-		//solveDirect(tasks, workers)
+	if *asp {
+		printASP(tasks, workers)
+	} else {
+		printSAT(tasks, workers)
 	}
+
 }
 
 func debug(arg ...interface{}) {
@@ -83,14 +87,42 @@ func debug(arg ...interface{}) {
 }
 
 type Task struct {
-	id    int
-	start int
-	end   int
+	id     int
+	start  int
+	end    int
+	worker map[int]bool
+}
+
+type ByStart []Task
+type ByEnd []Task
+
+func (a ByStart) Len() int             { return len(a) }
+func (a ByStart) Swap(i, j int)        { a[i], a[j] = a[j], a[i] }
+func (a ByStart) Less(i, j int) bool { //return a[i].start < a[j].start }
+	if a[i].start < a[j].start {
+		return true
+	} else if a[i].start == a[j].start {
+		return a[i].end < a[j].end
+	} else {
+		return false
+	}
+}
+
+func (a ByEnd) Len() int      { return len(a) }
+func (a ByEnd) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
+func (a ByEnd) Less(i, j int) bool {
+	if a[i].end < a[j].end {
+		return true
+	} else if a[i].end == a[j].end {
+		return a[i].start < a[j].start
+	} else {
+		return false
+	}
 }
 
 type Worker struct {
-	id    int
-	skill []int
+	id     int
+	skills []int
 }
 
 func parse(filename string) (tasks []Task, workers []Worker) {
@@ -101,12 +133,6 @@ func parse(filename string) (tasks []Task, workers []Worker) {
 		fmt.Println("Please specifiy correct path to instance. File does not exist: ", filename)
 		panic(err)
 	}
-
-	output, err := os.Create(*out)
-	if err != nil {
-		panic(err)
-	}
-	defer output.Close()
 
 	lines := strings.Split(string(input), "\n")
 
@@ -137,7 +163,7 @@ func parse(filename string) (tasks []Task, workers []Worker) {
 		case 2:
 			start, _ := strconv.Atoi(numbers[0])
 			end, _ := strconv.Atoi(numbers[1])
-			tasks[id] = Task{id, start, end}
+			tasks[id] = Task{id, start, end, make(map[int]bool, 0)}
 			id++
 			if id == len(tasks) {
 				state = 3
@@ -154,16 +180,33 @@ func parse(filename string) (tasks []Task, workers []Worker) {
 			{
 				n, _ := strconv.Atoi(strings.TrimRight(numbers[0], ":"))
 				workers[id].id = id
-				workers[id].skill = make([]int, n)
+				workers[id].skills = make([]int, n)
 
-				for i, _ := range workers[id].skill {
+				for i, _ := range workers[id].skills {
 					x, _ := strconv.Atoi(numbers[i+1])
-					workers[id].skill[i] = x
+					workers[id].skills[i] = x
 				}
 				id++
 			}
 		}
 	}
+
+	for _, w := range workers {
+		for _, s := range w.skills {
+			tasks[s].worker[w.id] = true
+		}
+	}
+
+	return
+}
+
+func printASP(tasks []Task, workers []Worker) {
+
+	output, err := os.Create(*out)
+	if err != nil {
+		panic(err)
+	}
+	defer output.Close()
 
 	for _, w := range tasks {
 		s := "task(" + strconv.Itoa(w.id) + "," + strconv.Itoa(w.start) + "," + strconv.Itoa(w.end) + ").\n"
@@ -173,179 +216,144 @@ func parse(filename string) (tasks []Task, workers []Worker) {
 	}
 
 	for _, w := range workers {
-		for _, t := range w.skill {
+		for _, t := range w.skills {
 			s := "worker2task(" + strconv.Itoa(w.id) + "," + strconv.Itoa(t) + ").\n"
 			if _, err := output.Write([]byte(s)); err != nil {
 				panic(err)
 			}
 		}
 	}
-
-	return
 }
 
-//func computeValue(warehouses []Warehouse, customers []Customer, assignment []int) (cost float64) {
-//
-//	added := make([]bool, len(warehouses))
-//
-//	for c, w := range assignment {
-//
-//		cost += customers[c].costs[w]
-//
-//		if !added[w] {
-//			cost += warehouses[w].setup
-//
-//			added[w] = true
-//		}
-//	}
-//	return
-//}
-//
-//func solveDirect(warehouses []Warehouse, customers []Customer) {
-//
-//	result := make(chan Result)
-//	optimum := make(chan bool)
-//	timeout := make(chan bool, 1)
-//	go func() {
-//		time.Sleep(time.Duration(*ttimeout) * time.Second)
-//		timeout <- true
-//	}()
-//
-//	go solveProblem(result, optimum)
-//
-//	assignment := make([]int, len(customers))
-//
-//	stop := false
-//	current := 0.0
-//	optimal := 0
-//
-//	answer := 0
-//
-//	for !stop {
-//		select {
-//		case r := <-result:
-//
-//			if answer < r.i && parseResult(r.s, assignment) {
-//				current = computeValue(warehouses, customers, assignment)
-//			}
-//		case b := <-optimum:
-//			if b {
-//				optimal = 1
-//			}
-//			stop = true
-//		case <-timeout:
-//			debug("recieved timeout from solver")
-//			stop = true
-//		}
-//	}
-//
-//	close(result)
-//	close(optimum)
-//
-//	fmt.Printf("%v %v\n", current, optimal)
-//	for _, x := range assignment {
-//		fmt.Printf("%v ", x)
-//	}
-//	fmt.Printf("\n")
-//}
-//
-//func round(in float64) int {
-//	if in-math.Floor(in) > 0.5 {
-//		return int(math.Floor(in) + 1)
-//	} else {
-//		return int(math.Floor(in))
-//	}
-//}
-//
-//func parseResult(s string, assignment []int) bool {
-//	ss := strings.Split(string(s), " ")
-//
-//	ok := len(assignment) == len(ss)
-//
-//	if ok {
-//		for _, x := range ss {
-//
-//			if strings.HasPrefix(x, "assign") {
-//				numbers := digitRegexp.FindAllString(x, -1)
-//
-//				if 2 == len(numbers) {
-//
-//					customer, b1 := strconv.Atoi(numbers[0])
-//					warehouse, b2 := strconv.Atoi(numbers[1])
-//					if b1 != nil || b2 != nil {
-//						panic("bad conversion of numbers in result")
-//					}
-//					assignment[customer] = warehouse
-//				} else {
-//					ok = false
-//					break
-//				}
-//			}
-//		}
-//	}
-//
-//	return ok
-//}
+func printSAT(tasks []Task, workers []Worker) {
 
-//func solveProblem(result chan<- Result, optimum chan<- bool) {
-//
-//	gringo := exec.Command("gringo", *out, *model)
-//	clasp := exec.Command("clasp", "--configuration=chatty", "--stat", "-t 4", "--time-limit", strconv.Itoa(*ttimeout))
-//	clasp.Stdin, _ = gringo.StdoutPipe()
-//
-//	mw := NewClaspFilter(result, optimum)
-//	clasp.Stdout = &mw
-//
-//	_ = clasp.Start()
-//	_ = gringo.Run()
-//	_ = clasp.Wait()
-//
-//}
-//
-//type Result struct {
-//	s string
-//	i int
-//}
-//
-//type ClaspFilter struct {
-//	result  chan<- Result
-//	optimum chan<- bool // true: optimium, false: satisfiable
-//	answer  int         // nth answer from clasp
-//	backup  string      // keep string if last string no new line
-//}
-//
-//func NewClaspFilter(result chan<- Result, optimum chan<- bool) (cf ClaspFilter) {
-//	cf.result = result
-//	cf.optimum = optimum
-//	return
-//}
-//
-//func (cf *ClaspFilter) Write(p []byte) (n int, err error) {
-//
-//	cf.backup += string(p)
-//
-//	lines := strings.Split(cf.backup, "\n")
-//
-//	if lines[len(lines)-1] == "" {
-//		cf.backup = ""
-//
-//		for _, s := range lines {
-//
-//			if strings.Contains(s, "assign") {
-//				cf.answer++
-//				cf.result <- Result{s, cf.answer}
-//			} else {
-//				debug("clasp:", s)
-//			}
-//
-//			if strings.Contains(s, "OPTIMUM FOUND") {
-//				cf.optimum <- true
-//			}
-//			if strings.Contains(s, "SATISFIABLE") {
-//				cf.optimum <- false
-//			}
-//		}
-//	}
-//
-//	return len(p), nil
-//}
+	pAssign := sat.Pred("assign")
+	pWorks := sat.Pred("works")
+
+	sat.SetUp(4, sorters.Pairwise)
+	var clauses sat.ClauseSet
+
+	// at least one: simple clause
+	for _, t := range tasks {
+		lits := make([]sat.Literal, len(t.worker))
+		i := 0
+		for wId, _ := range t.worker {
+			lits[i] = sat.Literal{true, sat.Atom{pAssign, wId, t.id}}
+			i++
+		}
+
+		clauses.AddClause("al1", lits...)
+
+		clauses.AddClauseSet(sat.CreateCardinality("am1", lits, 1, sorters.AtMost))
+
+	}
+
+	// count number of employees
+
+	for _, w := range workers {
+		for _, tId := range w.skills {
+
+			l1 := sat.Literal{false, sat.Atom{pAssign, w.id, tId}}
+			l2 := sat.Literal{true, sat.Atom{pWorks, w.id, 0}}
+
+			clauses.AddClause("wrk", l1, l2)
+		}
+	}
+
+	lits := make([]sat.Literal, len(workers))
+	for i, w := range workers {
+		lits[i] = sat.Literal{true, sat.Atom{pWorks, w.id, 0}}
+	}
+
+	clauses.AddClauseSet(sat.CreateCardinality("cWo", lits, *nWorkers, sorters.AtMost))
+
+	// intersections on the timeline: two ways to do it
+	// 1) list all intersecting tasks
+	// 2) find maximal cliques in the interval graph, and post for that
+
+	for _, w := range workers {
+
+		ts := make([]Task, len(w.skills))
+		for i, s := range w.skills {
+			ts[i] = tasks[s]
+		}
+		sort.Sort(ByStart(ts))
+
+		switch *typeIntersect {
+		case "simple":
+			for i, t1 := range ts {
+				for j := i + 1; j < len(ts); j++ {
+					t2 := ts[j]
+					if t2.start < t1.end {
+						l1 := sat.Literal{false, sat.Atom{pAssign, w.id, t1.id}}
+						l2 := sat.Literal{false, sat.Atom{pAssign, w.id, t2.id}}
+						clauses.AddClause("isc1", l1, l2)
+					}
+				}
+			}
+		case "clique":
+			// find the maximal cliques in the interval graph and pose AMO on them
+
+			clique := make([]Task, 0)
+
+			for _, t := range ts {
+
+				sort.Sort(ByEnd(clique))
+
+				//todo: use a priority queue, e.g. heap
+				//first one is earliest end time
+
+				if len(clique) > 0 && clique[0].end <= t.start {
+					// max clique reached
+					//output the maximal clique!
+
+					if len(clique) > 1 {
+
+						lits := make([]sat.Literal, len(clique))
+
+						for i, c := range clique {
+							lits[i] = sat.Literal{true, sat.Atom{pAssign, w.id, c.id}}
+							fmt.Print(c.id, "(", c.start, ",", c.end, ") ")
+						}
+						fmt.Println()
+
+						//fmt.Println("clique", w.id, lits)
+						clauses.AddClauseSet(sat.CreateCardinality("cli", lits, 1, sorters.AtMost))
+					}
+
+					//start removing elements:
+					for len(clique) > 0 && clique[0].end <= t.start {
+						clique = clique[1:]
+					}
+				}
+				clique = append(clique, t)
+			}
+			if len(clique) > 1 {
+
+				lits := make([]sat.Literal, len(clique))
+
+				for i, c := range clique {
+					lits[i] = sat.Literal{true, sat.Atom{pAssign, w.id, c.id}}
+				}
+
+				//fmt.Println("clique", w.id, lits)
+				clauses.AddClauseSet(sat.CreateCardinality("cli", lits, 1, sorters.AtMost))
+			}
+
+		default:
+			panic("Type not implemented")
+		}
+	}
+
+	g := sat.IdGenerator(len(clauses) * 7)
+	g.GenerateIds(clauses)
+
+	//g.Filename = strings.Split(*f, ".")[0] + ".cnf"
+	//g.Filename = *out
+
+	if *dbg {
+		g.PrintDebug(clauses)
+	} else {
+		g.PrintClausesDIMACS(clauses)
+	}
+}
